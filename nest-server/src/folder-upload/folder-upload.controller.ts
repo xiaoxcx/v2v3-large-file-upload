@@ -28,8 +28,7 @@ export class FolderUploadController {
             const relativePath = paths[fileIndex];
 
             if (!relativePath) {
-              console.log('Missing path for file:', file.originalname);
-              // 如果没有相对路径，使用原始文件名作为路径
+              // 如果没有相对路径，说明是直接上传的文件
               const folderName = req.body.folderName || 'uploads';
               return cb(null, path.join(process.cwd(), 'uploads', folderName));
             }
@@ -61,8 +60,28 @@ export class FolderUploadController {
         },
         filename: (req, file, cb) => {
           try {
-            // 使用原始文件名，保持文件名不变
-            const fileName = path.basename(file.originalname);
+            // 解析请求体中的路径信息
+            let paths;
+            try {
+              paths = JSON.parse(req.body.paths);
+            } catch {
+              paths = req.body.paths || [];
+            }
+
+            // 获取文件索引
+            const fileIndex = parseInt(file.fieldname.replace('files[', '').replace(']', '')) || 0;
+            const relativePath = paths[fileIndex];
+
+            if (!relativePath) {
+              // 如果没有相对路径，使用原始文件名
+              return cb(null, file.originalname);
+            }
+
+            // 规范化路径分隔符并移除开头的斜杠
+            const normalizedPath = relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
+            
+            // 获取文件名
+            const fileName = path.basename(normalizedPath);
             cb(null, fileName);
           } catch (error) {
             console.error('Error in filename handler:', error);
@@ -98,11 +117,21 @@ export class FolderUploadController {
         // 规范化路径分隔符并移除开头的斜杠
         const normalizedPath = relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
         
+        // 构建正确的服务器路径
+        const serverPath = path.join(process.cwd(), 'uploads', normalizedPath);
+        
+        // 确保文件路径正确
+        const fileDir = path.dirname(serverPath);
+        if (!fs.existsSync(fileDir)) {
+          fs.mkdirSync(fileDir, { recursive: true });
+        }
+
         return {
           ...file,
           relativePath: normalizedPath,
           originalPath: normalizedPath,
-          directory: path.dirname(normalizedPath)
+          directory: path.dirname(normalizedPath),
+          serverPath: serverPath
         };
       });
 
@@ -115,12 +144,12 @@ export class FolderUploadController {
       return {
         code: 0,
         success: true,
-        message: '文件夹上传成功',
+        message: '文件上传成功',
         data: result
       };
 
     } catch (error) {
-      console.error('Upload folder error:', error);
+      console.error('Upload error:', error);
       throw new HttpException(
         {
           code: -1,

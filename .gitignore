@@ -3,6 +3,7 @@ node_modules
 dist
 nest-server/dist
 nest-server/target
+nest-server/uploads
 
 # local env files
 .env.local

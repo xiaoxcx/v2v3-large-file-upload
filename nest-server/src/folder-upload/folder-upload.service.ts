@@ -21,25 +21,67 @@ export class FolderUploadService {
       }
 
       // 处理文件数组，保持原始路径结构
-      const uploadedFiles = files.map(file => {
+      const uploadedFiles = await Promise.all(files.map(async file => {
         if (!file || !file.path) {
           throw new Error('无效的文件对象');
         }
 
-        // 确保路径使用正斜杠
-        const relativePath = file.relativePath.replace(/\\/g, '/');
-        const serverPath = file.path.replace(/\\/g, '/');
-        
-        return {
-          originalName: file.originalname,
-          filename: path.basename(file.filename || file.originalname),
-          relativePath: relativePath,
-          serverPath: serverPath,
-          size: file.size,
-          mimetype: file.mimetype,
-          directory: path.dirname(relativePath)
-        };
-      });
+        try {
+          // 规范化路径
+          const relativePath = file.relativePath.replace(/\\/g, '/');
+          const serverPath = path.join(process.cwd(), 'uploads', relativePath);
+          
+          // 确保文件路径正确
+          const fileDir = path.dirname(serverPath);
+          if (!fs.existsSync(fileDir)) {
+            fs.mkdirSync(fileDir, { recursive: true });
+          }
+
+          // 如果文件不在正确的位置，移动它
+          if (file.path !== serverPath) {
+            // 确保目标目录存在
+            const targetDir = path.dirname(serverPath);
+            if (!fs.existsSync(targetDir)) {
+              fs.mkdirSync(targetDir, { recursive: true });
+            }
+
+            // 如果目标文件已存在，先删除
+            if (fs.existsSync(serverPath)) {
+              fs.unlinkSync(serverPath);
+            }
+
+            // 使用流的方式复制文件
+            const readStream = fs.createReadStream(file.path);
+            const writeStream = fs.createWriteStream(serverPath);
+            
+            await new Promise((resolve, reject) => {
+              readStream.pipe(writeStream)
+                .on('finish', () => resolve(undefined))
+                .on('error', reject);
+            });
+            
+            // 删除临时文件
+            try {
+              fs.unlinkSync(file.path);
+            } catch (unlinkError) {
+              console.warn('删除临时文件失败:', unlinkError);
+            }
+          }
+          
+          return {
+            originalName: file.originalname,
+            filename: path.basename(file.filename || file.originalname),
+            relativePath: relativePath,
+            serverPath: serverPath,
+            size: file.size,
+            mimetype: file.mimetype,
+            directory: path.dirname(relativePath)
+          };
+        } catch (error) {
+          console.error('处理文件时出错:', error);
+          throw new Error(`处理文件 ${file.originalname} 时出错: ${error.message}`);
+        }
+      }));
 
       // 构建目录树结构
       const folderStructure = this.buildFolderStructure(uploadedFiles);
@@ -47,14 +89,14 @@ export class FolderUploadService {
       return {
         code: 0,
         success: true,
-        message: '文件夹上传成功',
+        message: '文件上传成功',
         folderName,
         files: uploadedFiles,
         structure: folderStructure,
         totalFiles: uploadedFiles.length
       };
     } catch (error) {
-      console.error('处理上传文件夹时出错:', error);
+      console.error('处理上传文件时出错:', error);
       throw new HttpException(
         {
           code: -1,
