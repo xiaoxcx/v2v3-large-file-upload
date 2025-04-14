@@ -17,6 +17,11 @@
         <h2>多文件上传</h2>
         <p>支持多文件同时上传，带进度显示</p>
       </div>
+
+      <div class="card" @click="navigateTo('download')">
+        <h2>文件下载</h2>
+        <p>支持文件下载，断点续传</p>
+      </div>
     </div>
   </div>
 </template>
