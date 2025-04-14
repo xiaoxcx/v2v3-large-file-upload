@@ -95,6 +95,7 @@ export class DownloadController {
           'Content-Length': fileSize,
           'Content-Type': 'application/octet-stream',
           'Content-Disposition': `attachment; filename=${encodeURIComponent(decodedFilename)}`,
+          'Accept-Ranges': 'bytes', // 添加支持断点续传的响应头
         });
         
         fs.createReadStream(filePath).pipe(res);

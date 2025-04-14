@@ -13,11 +13,35 @@
         <el-table-column label="操作">
           <template #default="scope">
             <div class="operation-column">
-              <el-button type="primary" @click="downloadFile(scope.row.filename)" :loading="downloading === scope.row.filename">
-                下载
-              </el-button>
+              <template v-if="!downloadingStates[scope.row.filename]">
+                <el-button type="primary" @click="startDownload(scope.row.filename)">
+                  下载
+                </el-button>
+              </template>
+              <template v-else>
+                <el-button 
+                  v-if="!downloadingStates[scope.row.filename].paused"
+                  type="warning" 
+                  @click="pauseDownload(scope.row.filename)"
+                >
+                  暂停
+                </el-button>
+                <el-button 
+                  v-else
+                  type="success" 
+                  @click="resumeDownload(scope.row.filename)"
+                >
+                  继续
+                </el-button>
+                <el-button 
+                  type="danger" 
+                  @click="stopDownload(scope.row.filename)"
+                >
+                  停止
+                </el-button>
+              </template>
               <el-progress 
-                v-if="downloading === scope.row.filename"
+                v-if="downloadingStates[scope.row.filename]"
                 :percentage="downloadProgress[scope.row.filename] || 0"
                 :stroke-width="15"
                 :show-text="false"
@@ -42,6 +66,8 @@ export default {
     const loading = ref(false);
     const downloading = ref('');
     const downloadProgress = ref({});
+    const downloadingStates = ref({}); // 存储下载状态
+    const downloadControllers = ref({}); // 存储下载控制器
 
     const fetchWithRetry = async (url, options = {}, retries = 3) => {
       try {
@@ -111,24 +137,74 @@ export default {
       }
     };
 
+    const startDownload = async (filename) => {
+      if (downloadingStates.value[filename]) {
+        return;
+      }
+
+      downloadingStates.value[filename] = {
+        paused: false,
+        receivedLength: 0,
+        totalSize: 0
+      };
+
+      downloadControllers.value[filename] = new AbortController();
+      await downloadFile(filename);
+    };
+
+    const pauseDownload = (filename) => {
+      if (downloadingStates.value[filename]) {
+        downloadingStates.value[filename].paused = true;
+        downloadControllers.value[filename].abort();
+      }
+    };
+
+    const resumeDownload = async (filename) => {
+      if (downloadingStates.value[filename] && downloadingStates.value[filename].paused) {
+        downloadingStates.value[filename].paused = false;
+        downloadControllers.value[filename] = new AbortController();
+        await downloadFile(filename);
+      }
+    };
+
+    const stopDownload = (filename) => {
+      if (downloadingStates.value[filename]) {
+        // 强制终止下载控制器
+        downloadControllers.value[filename].abort();
+        
+        // 清理所有状态
+        delete downloadingStates.value[filename];
+        delete downloadControllers.value[filename];
+        downloadProgress.value[filename] = 0;
+        
+        // 重置下载状态
+        downloading.value = '';
+        
+        // 显示停止消息
+        ElMessage.info('下载已停止');
+      }
+    };
+
     const downloadFile = async (filename) => {
       downloading.value = filename;
-      downloadProgress.value[filename] = 0;
+      const state = downloadingStates.value[filename];
+      
       try {
         console.log('开始下载文件:', filename);
         
-        // 创建一个新的 AbortController 用于控制下载
-        const controller = new AbortController();
-        const signal = controller.signal;
-
-        // 使用 fetch 下载文件，支持断点续传
         const response = await fetchWithRetry(`http://localhost:3030/download/${filename}`, {
           headers: {
             'Accept': 'application/octet-stream',
-            'Range': 'bytes=0-' // 从开始下载
+            'Range': `bytes=${state.receivedLength}-`
           },
-          signal
+          signal: downloadControllers.value[filename].signal
         });
+
+        // 检查是否被停止
+        if (!downloadingStates.value[filename]) {
+          console.log('下载已被停止');
+          return;
+        }
 
         console.log('下载响应状态:', response.status);
         
@@ -139,14 +215,25 @@ export default {
 
         // 获取文件大小
         const contentLength = response.headers.get('Content-Length');
-        const totalSize = parseInt(contentLength, 10);
+        const totalSize = parseInt(contentLength, 10) + state.receivedLength;
+        state.totalSize = totalSize;
         
         // 创建可读流
         const reader = response.body.getReader();
         const chunks = [];
-        let receivedLength = 0;
+        let receivedLength = state.receivedLength;
 
         while(true) {
+          // 检查是否被停止
+          if (!downloadingStates.value[filename]) {
+            console.log('下载已被停止');
+            return;
+          }
+
+          if (state.paused) {
+            break;
+          }
+
           const {done, value} = await reader.read();
           
           if (done) {
@@ -155,6 +242,7 @@ export default {
           
           chunks.push(value);
           receivedLength += value.length;
+          state.receivedLength = receivedLength;
           
           // 更新下载进度
           const progress = Math.round((receivedLength / totalSize) * 100);
@@ -162,23 +250,38 @@ export default {
           console.log(`已下载: ${receivedLength} / ${totalSize}`);
         }
 
-        // 合并所有 chunks
-        const blob = new Blob(chunks);
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-        ElMessage.success('下载成功');
+        if (!state.paused && downloadingStates.value[filename]) {
+          // 合并所有 chunks
+          const blob = new Blob(chunks);
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          window.URL.revokeObjectURL(url);
+          document.body.removeChild(a);
+          ElMessage.success('下载成功');
+          
+          // 清理状态
+          delete downloadingStates.value[filename];
+          delete downloadControllers.value[filename];
+          downloadProgress.value[filename] = 0;
+        }
       } catch (error) {
-        console.error('下载失败:', error);
-        ElMessage.error(error.message || '下载失败，请重试');
+        if (error.name === 'AbortError') {
+          console.log('下载已暂停或停止');
+        } else {
+          console.error('下载失败:', error);
+          ElMessage.error(error.message || '下载失败，请重试');
+          
+          // 清理状态
+          delete downloadingStates.value[filename];
+          delete downloadControllers.value[filename];
+          downloadProgress.value[filename] = 0;
+        }
       } finally {
         downloading.value = '';
-        downloadProgress.value[filename] = 0;
       }
     };
 
@@ -197,7 +300,11 @@ export default {
       loading,
       downloading,
       downloadProgress,
-      downloadFile,
+      downloadingStates,
+      startDownload,
+      pauseDownload,
+      resumeDownload,
+      stopDownload,
       formatDate
     };
   }
