@@ -4,6 +4,7 @@ import FileUpload from '@/views/FileUpload.vue'
 import FileManager from '@/views/FileManager.vue'
 import MultipleUpload from '@/views/MultipleUpload.vue'
 import DownloadView from '../views/DownloadView.vue'
+import UploadImage from '../views/UploadImage.vue'
 
 const routes = [
   {
@@ -34,6 +35,11 @@ const routes = [
     path: '/download',
     name: 'download',
     component: DownloadView
+  },
+  {
+    path: '/upload-image',
+    name: 'upload-image',
+    component: UploadImage
   }
 ]
 

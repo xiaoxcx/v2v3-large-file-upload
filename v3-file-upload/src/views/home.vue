@@ -22,6 +22,11 @@
         <h2>文件下载</h2>
         <p>支持文件下载，断点续传</p>
       </div>
+
+      <div class="card" @click="navigateTo('upload-image')">
+        <h2>图片批量上传</h2>
+        <p>支持拖拽上传，图片预览，批量处理</p>
+      </div>
     </div>
   </div>
 </template>
